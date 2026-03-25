@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, Vec};
+use soroban_sdk::{contracttype, Address, Env, Vec};
 
 use crate::errors::ContributorError;
 use crate::events::{
@@ -65,14 +65,12 @@ pub struct Proposal {
     pub created_at: u64,
     pub expires_at: u64,
     pub status: ProposalStatus,
-    /// Addresses that have already signed (dedup guard).
     pub signers: Vec<Address>,
     pub weight_collected: u32,
 }
 
-// ── Internal helpers (pub(crate) so lib.rs can call them) ────
+// ── Internal helpers ─────────────────────────────────────────
 
-/// Load and validate the multisig config.
 pub(crate) fn get_config(env: &Env) -> Result<MultisigConfig, ContributorError> {
     env.storage()
         .instance()
@@ -80,7 +78,6 @@ pub(crate) fn get_config(env: &Env) -> Result<MultisigConfig, ContributorError> 
         .ok_or(ContributorError::NotInitialized)
 }
 
-/// Find a signer entry by address, or return Unauthorized.
 pub(crate) fn find_signer(
     config: &MultisigConfig,
     addr: &Address,
@@ -93,7 +90,6 @@ pub(crate) fn find_signer(
     Err(ContributorError::Unauthorized)
 }
 
-/// Validate that a config is self-consistent.
 pub(crate) fn validate_config(
     signers: &Vec<Signer>,
     threshold: u32,
@@ -143,9 +139,6 @@ fn next_id(env: &Env) -> u64 {
 
 // ── Public multisig operations ───────────────────────────────
 
-/// Create a proposal for a sensitive action.
-/// The proposer must be a registered signer; their weight is
-/// immediately counted (proposing = signing).
 pub(crate) fn propose(
     env: &Env,
     proposer: Address,
@@ -196,9 +189,6 @@ pub(crate) fn propose(
     Ok(id)
 }
 
-/// Add a signature from a registered signer to an existing proposal.
-/// Returns the updated status so the caller can decide whether to
-/// proceed to execution immediately.
 pub(crate) fn sign(
     env: &Env,
     signer_addr: Address,
@@ -212,7 +202,6 @@ pub(crate) fn sign(
 
     assert_active(env, &proposal)?;
 
-    // Idempotency guard — no double-signing.
     for existing in proposal.signers.iter() {
         if existing == signer_addr {
             return Err(ContributorError::AlreadySigned);
@@ -242,14 +231,6 @@ pub(crate) fn sign(
     Ok(proposal.status)
 }
 
-/// Atomically validate and consume an approved proposal.
-///
-/// - Verifies the executor is a registered signer.
-/// - Verifies the proposal is `Approved` and matches `expected_action`.
-/// - Marks the proposal `Executed` (replay-proof).
-///
-/// Called at the top of every protected function instead of
-/// the old `admin.require_auth()` pattern.
 pub(crate) fn consume_approval(
     env: &Env,
     executor: &Address,
@@ -259,7 +240,7 @@ pub(crate) fn consume_approval(
     executor.require_auth();
 
     let config = get_config(env)?;
-    find_signer(&config, executor)?; // must be a signer
+    find_signer(&config, executor)?;
 
     let mut proposal = get_proposal(env, proposal_id)?;
 
@@ -287,8 +268,6 @@ pub(crate) fn consume_approval(
     Ok(())
 }
 
-/// Cancel a pending or approved proposal.
-/// Any registered signer may cancel.
 pub(crate) fn cancel(
     env: &Env,
     signer_addr: Address,
@@ -320,8 +299,6 @@ pub(crate) fn cancel(
     Ok(())
 }
 
-/// Mark a proposal as expired.
-/// Permissionless — anyone may call this after the TTL.
 pub(crate) fn expire(env: &Env, proposal_id: u64) -> Result<(), ContributorError> {
     let mut proposal = get_proposal(env, proposal_id)?;
 

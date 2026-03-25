@@ -72,7 +72,7 @@ impl ContributorRegistryContract {
         MultisigConfiguredEvent {
             configured_by: bootstrapper.address.clone(),
             threshold,
-            signer_count: signers.len() as u32,
+            signer_count: signers.len(), // no cast needed, already u32 in Soroban Vec
         }
         .publish(&env);
 
@@ -81,9 +81,6 @@ impl ContributorRegistryContract {
 
     // ── Multisig proposal lifecycle ──────────────────────────
 
-    /// Create a new proposal for a sensitive action.
-    /// The proposer must be a registered signer; their weight is
-    /// immediately counted (proposing = signing).
     pub fn propose(
         env: Env,
         proposer: Address,
@@ -92,7 +89,6 @@ impl ContributorRegistryContract {
         propose(&env, proposer, action)
     }
 
-    /// Add a signature to an existing proposal.
     pub fn sign(
         env: Env,
         signer: Address,
@@ -101,8 +97,6 @@ impl ContributorRegistryContract {
         sign(&env, signer, proposal_id)
     }
 
-    /// Cancel a pending or approved proposal.
-    /// Any registered signer may cancel.
     pub fn cancel_proposal(
         env: Env,
         signer: Address,
@@ -111,14 +105,10 @@ impl ContributorRegistryContract {
         cancel(&env, signer, proposal_id)
     }
 
-    /// Expire a proposal that has passed its TTL.
-    /// Permissionless.
     pub fn expire_proposal(env: Env, proposal_id: u64) -> Result<(), ContributorError> {
         expire(&env, proposal_id)
     }
 
-    /// Replace the entire signer set and threshold.
-    /// Guarded by an approved `SetAdmin` proposal.
     pub fn set_multisig_config(
         env: Env,
         executor: Address,
@@ -141,7 +131,7 @@ impl ContributorRegistryContract {
         MultisigConfiguredEvent {
             configured_by: executor,
             threshold: new_threshold,
-            signer_count: new_signers.len() as u32,
+            signer_count: new_signers.len(), // no cast needed
         }
         .publish(&env);
 
@@ -150,7 +140,6 @@ impl ContributorRegistryContract {
 
     // ── Contributor operations ───────────────────────────────
 
-    /// Register a new contributor with their GitHub handle.
     pub fn register_contributor(
         env: Env,
         address: Address,
@@ -187,7 +176,6 @@ impl ContributorRegistryContract {
         Ok(())
     }
 
-    /// Update an existing contributor's GitHub handle.
     pub fn update_contributor(
         env: Env,
         address: Address,
@@ -224,8 +212,6 @@ impl ContributorRegistryContract {
 
     // ── Sensitive functions — multisig-gated ─────────────────
 
-    /// Update a contributor's reputation score.
-    /// Requires an approved `UpdateReputation` proposal.
     pub fn update_reputation(
         env: Env,
         executor: Address,
@@ -262,8 +248,6 @@ impl ContributorRegistryContract {
         Ok(())
     }
 
-    /// Upgrade the contract WASM.
-    /// Requires an approved `Upgrade` proposal.
     pub fn upgrade(
         env: Env,
         executor: Address,
@@ -284,8 +268,6 @@ impl ContributorRegistryContract {
         Ok(())
     }
 
-    /// Transfer admin designation to a new address.
-    /// Requires an approved `SetAdmin` proposal.
     pub fn set_admin(
         env: Env,
         executor: Address,
@@ -352,18 +334,15 @@ impl ContributorRegistryContract {
     }
 }
 
-// ── Notification receiver (project owner's addition) ─────────
+// ── Notification receiver ─────────────────────────────────────
 
 #[contractimpl]
 impl NotificationReceiverTrait for ContributorRegistryContract {
     fn on_notify(env: Env, notification: Notification) {
-        // Only react to "deposit" events
         if notification.event_type == Symbol::new(&env, "deposit") {
-            // Unpack data: (user: Address, project_id: u64, amount: i128)
             let (user, _project_id, _amount): (Address, u64, i128) =
                 <(Address, u64, i128)>::from_xdr(&env, &notification.data).unwrap();
 
-            // Award 1 reputation point per deposit if contributor is registered.
             if let Some(mut contributor) = env
                 .storage()
                 .persistent()
@@ -383,7 +362,12 @@ impl NotificationReceiverTrait for ContributorRegistryContract {
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::{testutils::Address as TestAddress, Address, Env, Vec};
+    use soroban_sdk::{
+        testutils::{Address as TestAddress, Ledger}, // Ledger trait for set_timestamp
+        Address,
+        Env,
+        Vec,
+    };
 
     struct Setup {
         env: Env,
@@ -396,7 +380,8 @@ mod test {
     fn setup() -> Setup {
         let env = Env::default();
         env.mock_all_auths();
-        let contract = env.register_contract(None, ContributorRegistryContract);
+        // env.register() replaces the deprecated env.register_contract()
+        let contract = env.register(ContributorRegistryContract, ());
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
         let carol = Address::generate(&env);
@@ -427,11 +412,14 @@ mod test {
         }
     }
 
+    // ── Initialisation ────────────────────────────────────────
+
     #[test]
     fn test_initialize_stores_config() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
-        let config = client.get_multisig_config().unwrap();
+        // Client methods return values directly — no .unwrap() needed.
+        let config = client.get_multisig_config();
         assert_eq!(config.threshold, 3);
         assert_eq!(config.signers.len(), 3);
     }
@@ -445,6 +433,7 @@ mod test {
             address: s.alice.clone(),
             weight: 1,
         });
+        // try_* variants return Result and are used to assert failure.
         assert!(client.try_initialize(&signers, &1u32).is_err());
     }
 
@@ -452,7 +441,7 @@ mod test {
     fn test_threshold_above_total_weight_fails() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract = env.register_contract(None, ContributorRegistryContract);
+        let contract = env.register(ContributorRegistryContract, ());
         let client = ContributorRegistryContractClient::new(&env, &contract);
         let alice = Address::generate(&env);
 
@@ -464,13 +453,15 @@ mod test {
         assert!(client.try_initialize(&signers, &99u32).is_err());
     }
 
+    // ── Propose ───────────────────────────────────────────────
+
     #[test]
     fn test_propose_counts_proposer_weight() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        let proposal = client.get_proposal(&id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        let proposal = client.get_proposal(&id);
 
         assert_eq!(proposal.weight_collected, 2);
         assert_eq!(proposal.status, ProposalStatus::Pending);
@@ -490,7 +481,7 @@ mod test {
     fn test_single_signer_above_threshold_auto_approves() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract = env.register_contract(None, ContributorRegistryContract);
+        let contract = env.register(ContributorRegistryContract, ());
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
@@ -507,18 +498,20 @@ mod test {
         let client = ContributorRegistryContractClient::new(&env, &contract);
         client.initialize(&signers, &3u32);
 
-        let id = client.propose(&alice, &ProposalAction::Upgrade).unwrap();
-        let proposal = client.get_proposal(&id).unwrap();
+        let id = client.propose(&alice, &ProposalAction::Upgrade);
+        let proposal = client.get_proposal(&id);
         assert_eq!(proposal.status, ProposalStatus::Approved);
     }
+
+    // ── Sign ──────────────────────────────────────────────────
 
     #[test]
     fn test_sign_reaches_threshold() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        let status = client.sign(&s.bob, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        let status = client.sign(&s.bob, &id);
         assert_eq!(status, ProposalStatus::Approved);
     }
 
@@ -527,7 +520,7 @@ mod test {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.bob, &ProposalAction::Upgrade).unwrap();
+        let id = client.propose(&s.bob, &ProposalAction::Upgrade);
         assert!(client.try_sign(&s.bob, &id).is_err());
     }
 
@@ -537,7 +530,7 @@ mod test {
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
         let outsider = Address::generate(&s.env);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
         assert!(client.try_sign(&outsider, &id).is_err());
     }
 
@@ -546,24 +539,28 @@ mod test {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.bob, &ProposalAction::Upgrade).unwrap();
-        client.sign(&s.carol, &id).unwrap();
+        let id = client.propose(&s.bob, &ProposalAction::Upgrade);
+        client.sign(&s.carol, &id);
 
-        let proposal = client.get_proposal(&id).unwrap();
+        let proposal = client.get_proposal(&id);
         assert_eq!(proposal.status, ProposalStatus::Pending);
     }
+
+    // ── Execute ───────────────────────────────────────────────
 
     #[test]
     fn test_upgrade_executes_after_approval() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        client.sign(&s.bob, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        client.sign(&s.bob, &id);
 
         let wasm_hash = BytesN::from_array(&s.env, &[1u8; 32]);
         let _ = client.try_upgrade(&s.alice, &id, &wasm_hash);
-        let proposal = client.get_proposal(&id).unwrap();
+        // Deployer will panic in test env but consume_approval runs first,
+        // so we verify the proposal was marked Executed before the panic.
+        let proposal = client.get_proposal(&id);
         assert_eq!(proposal.status, ProposalStatus::Executed);
     }
 
@@ -572,7 +569,7 @@ mod test {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.bob, &ProposalAction::Upgrade).unwrap();
+        let id = client.propose(&s.bob, &ProposalAction::Upgrade);
         let wasm_hash = BytesN::from_array(&s.env, &[1u8; 32]);
         assert!(client.try_upgrade(&s.bob, &id, &wasm_hash).is_err());
     }
@@ -582,8 +579,8 @@ mod test {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        client.sign(&s.bob, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        client.sign(&s.bob, &id);
 
         let new_admin = Address::generate(&s.env);
         assert!(client.try_set_admin(&s.alice, &id, &new_admin).is_err());
@@ -594,13 +591,15 @@ mod test {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        client.sign(&s.bob, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        client.sign(&s.bob, &id);
         let wasm_hash = BytesN::from_array(&s.env, &[1u8; 32]);
         let _ = client.try_upgrade(&s.alice, &id, &wasm_hash);
 
         assert!(client.try_upgrade(&s.alice, &id, &wasm_hash).is_err());
     }
+
+    // ── update_reputation ─────────────────────────────────────
 
     #[test]
     fn test_update_reputation_requires_multisig() {
@@ -609,7 +608,7 @@ mod test {
 
         let contributor = Address::generate(&s.env);
         let handle = soroban_sdk::String::from_str(&s.env, "dev_handle");
-        client.register_contributor(&contributor, &handle).unwrap();
+        client.register_contributor(&contributor, &handle);
 
         let fake_id = 999u64;
         assert!(client
@@ -624,28 +623,26 @@ mod test {
 
         let contributor = Address::generate(&s.env);
         let handle = soroban_sdk::String::from_str(&s.env, "dev_handle");
-        client.register_contributor(&contributor, &handle).unwrap();
+        client.register_contributor(&contributor, &handle);
 
-        let id = client
-            .propose(&s.alice, &ProposalAction::UpdateReputation)
-            .unwrap();
-        client.sign(&s.bob, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::UpdateReputation);
+        client.sign(&s.bob, &id);
 
-        client
-            .update_reputation(&s.alice, &id, &contributor, &50i64)
-            .unwrap();
+        client.update_reputation(&s.alice, &id, &contributor, &50i64);
 
-        assert_eq!(client.get_reputation(&contributor).unwrap(), 50);
+        assert_eq!(client.get_reputation(&contributor), 50);
     }
+
+    // ── Cancel & expire ───────────────────────────────────────
 
     #[test]
     fn test_cancel_blocks_execution() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        client.sign(&s.bob, &id).unwrap();
-        client.cancel_proposal(&s.alice, &id).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        client.sign(&s.bob, &id);
+        client.cancel_proposal(&s.alice, &id);
 
         let wasm_hash = BytesN::from_array(&s.env, &[1u8; 32]);
         assert!(client.try_upgrade(&s.alice, &id, &wasm_hash).is_err());
@@ -657,15 +654,15 @@ mod test {
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
         s.env.ledger().set_timestamp(1_000_000);
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
 
         s.env
             .ledger()
             .set_timestamp(1_000_000 + multisig::PROPOSAL_TTL_SECS + 1);
 
-        client.expire_proposal(&id).unwrap();
+        client.expire_proposal(&id);
 
-        let proposal = client.get_proposal(&id).unwrap();
+        let proposal = client.get_proposal(&id);
         assert_eq!(proposal.status, ProposalStatus::Expired);
     }
 
@@ -675,35 +672,31 @@ mod test {
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
         s.env.ledger().set_timestamp(1_000_000);
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
         s.env.ledger().set_timestamp(1_000_000 + 3600);
 
         assert!(client.try_expire_proposal(&id).is_err());
     }
+
+    // ── Full integration flow ─────────────────────────────────
 
     #[test]
     fn test_full_upgrade_proposal_flow() {
         let s = setup();
         let client = ContributorRegistryContractClient::new(&s.env, &s.contract);
 
-        let id = client.propose(&s.alice, &ProposalAction::Upgrade).unwrap();
-        assert_eq!(
-            client.get_proposal(&id).unwrap().status,
-            ProposalStatus::Pending
-        );
+        let id = client.propose(&s.alice, &ProposalAction::Upgrade);
+        assert_eq!(client.get_proposal(&id).status, ProposalStatus::Pending);
 
-        let status = client.sign(&s.bob, &id).unwrap();
+        let status = client.sign(&s.bob, &id);
         assert_eq!(status, ProposalStatus::Approved);
 
-        let status = client.sign(&s.carol, &id).unwrap();
+        let status = client.sign(&s.carol, &id);
         assert_eq!(status, ProposalStatus::Approved);
 
         let wasm_hash = BytesN::from_array(&s.env, &[0xabu8; 32]);
         let _ = client.try_upgrade(&s.alice, &id, &wasm_hash);
-        assert_eq!(
-            client.get_proposal(&id).unwrap().status,
-            ProposalStatus::Executed
-        );
+        assert_eq!(client.get_proposal(&id).status, ProposalStatus::Executed);
 
         assert!(client.try_upgrade(&s.alice, &id, &wasm_hash).is_err());
     }
