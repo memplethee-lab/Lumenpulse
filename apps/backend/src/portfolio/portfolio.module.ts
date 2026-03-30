@@ -19,11 +19,17 @@ import {
 import { PortfolioSnapshotProgressStore } from './queue/portfolio-snapshot.progress-store';
 import { PortfolioSnapshotQueueService } from './queue/portfolio-snapshot.queue.service';
 import { PortfolioSnapshotWorker } from './queue/portfolio-snapshot.worker';
+import { ExchangeRatesModule } from '../exchange-rates/exchange-rates.module';
+import { StellarModule } from '../stellar/stellar.module';
+import { PriceModule } from '../price/price.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([PortfolioAsset, PortfolioSnapshot, User]),
     MetricsModule,
+    ExchangeRatesModule,
+    StellarModule,
+    PriceModule,
   ],
   controllers: [PortfolioController],
   providers: [
