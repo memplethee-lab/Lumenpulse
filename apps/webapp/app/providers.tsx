@@ -13,6 +13,7 @@ import {
   getAddress as freighterGetAddress,
   requestAccess,
 } from "@stellar/freighter-api";
+import { OnboardingProvider as OnboardingP } from "@/lib/onboarding";
 
 interface StellarWalletState {
   publicKey: string | null;
@@ -33,6 +34,8 @@ const StellarWalletContext = createContext<StellarWalletState>({
 export function useStellarWallet() {
   return useContext(StellarWalletContext);
 }
+
+export { OnboardingP as OnboardingProvider };
 
 export function StellarProvider({ children }: { children: ReactNode }) {
   const [publicKey, setPublicKey] = useState<string | null>(null);
