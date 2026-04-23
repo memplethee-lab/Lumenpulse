@@ -4,6 +4,7 @@ use soroban_sdk::{contractevent, Address};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InitializedEvent {
     pub admin: Address,
+    pub storage_version: u32,
 }
 
 #[contractevent]
@@ -108,6 +109,25 @@ pub struct ContributionRefundedEvent {
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectExpiredEvent {
+    #[topic]
+    pub project_id: u64,
+    pub refund_window_deadline: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContributionClawedBackEvent {
+    #[topic]
+    pub project_id: u64,
+    #[topic]
+    pub contributor: Address,
+    pub amount: i128,
+    pub refund_window_deadline: u64,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProtocolFeeDeductedEvent {
     #[topic]
     pub project_id: u64,
@@ -149,4 +169,12 @@ pub struct MilestoneApprovedByVoteEvent {
     #[topic]
     pub project_id: u64,
     pub milestone_id: u32,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageMigratedEvent {
+    #[topic]
+    pub admin: Address,
+    pub storage_version: u32,
 }

@@ -25,4 +25,9 @@ pub enum CrowdfundError {
     AlreadyVoted = 19,
     InsufficientContributionToVote = 20,
     MilestoneAlreadyApproved = 21,
+    UnsupportedStorageVersion = 22,
+    MigrationRequired = 23,
+    MilestoneExpired = 24,
+    RefundWindowClosed = 25,
+    RefundWindowNotOpen = 26,
 }

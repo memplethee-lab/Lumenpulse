@@ -1,4 +1,5 @@
 use crate::errors::CrowdfundError;
+use crate::storage::DataKey;
 use crate::{CrowdfundVaultContract, CrowdfundVaultContractClient};
 use soroban_sdk::{
     symbol_short,
@@ -55,6 +56,7 @@ fn test_initialize() {
 
     // Verify admin is set
     assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_storage_version(), 1);
 }
 
 #[test]
@@ -1355,6 +1357,38 @@ fn test_old_admin_cannot_upgrade_after_rotation() {
 }
 
 #[test]
+fn test_migrate_restores_legacy_contract_access() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, _, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    env.as_contract(&client.address, || {
+        env.storage().instance().remove(&DataKey::StorageVersion);
+    });
+
+    let result = client.try_create_project(
+        &owner,
+        &symbol_short!("Legacy"),
+        &1_000_000,
+        &token_client.address,
+    );
+    assert_eq!(result, Err(Ok(CrowdfundError::MigrationRequired)));
+
+    assert_eq!(client.migrate(&admin), 1);
+    assert_eq!(client.get_storage_version(), 1);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Legacy"),
+        &1_000_000,
+        &token_client.address,
+    );
+    assert_eq!(project_id, 0);
+}
+
+#[test]
 fn test_cancel_project() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1524,6 +1558,71 @@ fn test_cancel_project_failed() {
     assert_eq!(client.get_balance(&project_id), deposit_amount);
 
     client.refund_contributors(&project_id, &user);
+}
+
+#[test]
+fn test_milestone_expiry_enables_contributor_clawback() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Expiry"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &400_000);
+    client.approve_milestone(&admin, &project_id, &0);
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + crate::DEFAULT_MILESTONE_EXPIRY_SECONDS + 1);
+
+    let withdraw_result = client.try_withdraw(&project_id, &0, &100_000);
+    assert_eq!(withdraw_result, Err(Ok(CrowdfundError::MilestoneExpired)));
+    assert_eq!(
+        client.get_project_status(&project_id),
+        symbol_short!("EXPIRED")
+    );
+
+    let refunded = client.clawback_contribution(&project_id, &user);
+    assert_eq!(refunded, 400_000);
+    assert_eq!(client.get_balance(&project_id), 0);
+    assert_eq!(token_client.balance(&user), 10_000_000);
+}
+
+#[test]
+fn test_clawback_window_closes_after_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, owner, user, token_client) = setup_test(&env);
+    client.initialize(&admin);
+
+    let project_id = client.create_project(
+        &owner,
+        &symbol_short!("Expiry"),
+        &1_000_000,
+        &token_client.address,
+    );
+
+    client.deposit(&user, &project_id, &200_000);
+    client.approve_milestone(&admin, &project_id, &0);
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + crate::DEFAULT_MILESTONE_EXPIRY_SECONDS + 1);
+
+    let withdraw_result = client.try_withdraw(&project_id, &0, &50_000);
+    assert_eq!(withdraw_result, Err(Ok(CrowdfundError::MilestoneExpired)));
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + crate::DEFAULT_REFUND_WINDOW_SECONDS + 1);
+
+    let result = client.try_clawback_contribution(&project_id, &user);
+    assert_eq!(result, Err(Ok(CrowdfundError::RefundWindowClosed)));
 }
 
 #[test]
