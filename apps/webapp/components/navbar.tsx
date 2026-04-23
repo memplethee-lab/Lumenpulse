@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { Menu, X, Layers, Users, LayoutDashboard, Trophy } from "lucide-react";
 import { WalletButton } from "./wallet-button";
+import { ThemeSelector } from "./theme-selector";
 
 export function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -71,6 +72,11 @@ export function Navbar() {
             </Link>
           </div>
 
+          {/* Theme Selector */}
+          <div className="hidden md:block mr-4">
+            <ThemeSelector variant="segmented" />
+          </div>
+
           {/* Wallet Button */}
           <div className="hidden md:block">
             <WalletButton />
@@ -132,6 +138,13 @@ export function Navbar() {
             {/* Wallet connect in mobile menu */}
             <div className="w-full mt-2">
               <WalletButton className="w-full justify-center" />
+            </div>
+
+            {/* Theme Selector in mobile menu */}
+            <div className="w-full mt-4 pt-4 border-t border-primary/20">
+              <div className="flex justify-center">
+                <ThemeSelector variant="segmented" />
+              </div>
             </div>
           </div>
         </div>

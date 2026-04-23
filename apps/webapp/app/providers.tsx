@@ -113,3 +113,26 @@ export function StellarProvider({ children }: { children: ReactNode }) {
     </StellarWalletContext.Provider>
   );
 }
+
+/**
+ * Root Providers component that wraps the application with all necessary providers
+ * 
+ * This component combines:
+ * - ThemeProvider: Manages theme state, persistence, and system detection
+ * - StellarProvider: Manages Stellar wallet connection state
+ * 
+ * Requirements: 3.3, 3.1
+ */
+export function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ThemeProvider
+      defaultTheme="system"
+      storageKey="lumenpulse-theme-preference"
+      enableTransitions={true}
+    >
+      <StellarProvider>
+        {children}
+      </StellarProvider>
+    </ThemeProvider>
+  );
+}
