@@ -26,7 +26,7 @@ export default function DashboardPage() {
     // TODO: replace this with real user wallet later
     // For now, we simulate "no wallet connected"
     // In a real app, we would fetch the public key from the session/profile
-    setPublicKey("GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN");
+    setPublicKey(null);
 
     setIsLoading(false);
   }, [router]);
