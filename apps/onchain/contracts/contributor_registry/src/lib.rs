@@ -6,7 +6,10 @@ mod multisig;
 mod storage;
 
 use errors::ContributorError;
-use events::{AdminChangedEvent, GaslessRegistrationEvent, MultisigConfiguredEvent, UpgradedEvent};
+use events::{
+    AdminChangedEvent, BadgeGrantedEvent, BadgeRevokedEvent, GaslessRegistrationEvent,
+    MultisigConfiguredEvent, UpgradedEvent,
+};
 use multisig::{
     cancel, consume_approval, expire, get_config, get_proposal, propose, sign, validate_config,
     MultisigConfig, ProposalAction, ProposalStatus, Signer,
@@ -16,10 +19,7 @@ use soroban_sdk::xdr::FromXdr;
 use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Vec,
 };
-use storage::{
-    Badge, ContributorData, ContributorTier, DataKey, LEDGER_BUMP, LEDGER_THRESHOLD,
-    TIER_GOLD_MIN, TIER_PLATINUM_MIN, TIER_SILVER_MIN,
-};
+use storage::{Badge, ContributorData, ContributorTier, DataKey, LEDGER_BUMP, LEDGER_THRESHOLD};
 
 #[contract]
 pub struct ContributorRegistryContract;
@@ -424,6 +424,86 @@ impl ContributorRegistryContract {
         Ok(())
     }
 
+    pub fn grant_badge(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        contributor_address: Address,
+        badge: Badge,
+    ) -> Result<(), ContributorError> {
+        consume_approval(&env, &executor, proposal_id, &ProposalAction::GrantBadge)?;
+
+        // Ensure contributor exists
+        let _ = Self::get_contributor(env.clone(), contributor_address.clone())?;
+
+        let key = DataKey::Badges(contributor_address.clone());
+        let mut badges: Vec<Badge> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+
+        if !badges.contains(badge) {
+            badges.push_back(badge);
+            env.storage()
+                .persistent()
+                .set(&key, &badges);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        }
+
+        BadgeGrantedEvent {
+            contributor: contributor_address,
+            badge,
+            executor,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn revoke_badge(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+        contributor_address: Address,
+        badge: Badge,
+    ) -> Result<(), ContributorError> {
+        consume_approval(&env, &executor, proposal_id, &ProposalAction::RevokeBadge)?;
+
+        // Ensure contributor exists
+        let _ = Self::get_contributor(env.clone(), contributor_address.clone())?;
+
+        let key = DataKey::Badges(contributor_address.clone());
+        let mut badges: Vec<Badge> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+
+        if let Some(index) = badges.first_index_of(badge) {
+            badges.remove(index);
+            env.storage()
+                .persistent()
+                .set(&key, &badges);
+            if !badges.is_empty() {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+            }
+        }
+
+        BadgeRevokedEvent {
+            contributor: contributor_address,
+            badge,
+            executor,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     pub fn upgrade(
         env: Env,
         executor: Address,
@@ -470,6 +550,31 @@ impl ContributorRegistryContract {
 
     pub fn get_reputation(env: Env, contributor: Address) -> Result<u64, ContributorError> {
         Ok(Self::get_contributor(env, contributor)?.reputation_score)
+    }
+
+    pub fn get_tier(env: Env, contributor: Address) -> Result<ContributorTier, ContributorError> {
+        let rep = Self::get_reputation(env, contributor)?;
+        Ok(match rep {
+            0..=9 => ContributorTier::Novice,
+            10..=49 => ContributorTier::Builder,
+            50..=99 => ContributorTier::Architect,
+            _ => ContributorTier::Core,
+        })
+    }
+
+    pub fn get_badges(env: Env, contributor: Address) -> Vec<Badge> {
+        let key = DataKey::Badges(contributor);
+        let badges: Vec<Badge> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+        }
+        badges
     }
 
     pub fn get_contributor(
@@ -532,129 +637,6 @@ impl ContributorRegistryContract {
             .unwrap_or(0)
     }
 
-    // ── Tier & badge functions ────────────────────────────────
-
-    /// Return the tier of a contributor based on their current reputation score.
-    ///
-    /// Thresholds (inclusive lower bound):
-    /// - Platinum : ≥ TIER_PLATINUM_MIN
-    /// - Gold     : ≥ TIER_GOLD_MIN
-    /// - Silver   : ≥ TIER_SILVER_MIN
-    /// - Bronze   : everything else
-    pub fn get_tier(env: Env, contributor: Address) -> Result<ContributorTier, ContributorError> {
-        let data = Self::get_contributor(env, contributor)?;
-        let tier = if data.reputation_score >= TIER_PLATINUM_MIN {
-            ContributorTier::Platinum
-        } else if data.reputation_score >= TIER_GOLD_MIN {
-            ContributorTier::Gold
-        } else if data.reputation_score >= TIER_SILVER_MIN {
-            ContributorTier::Silver
-        } else {
-            ContributorTier::Bronze
-        };
-        Ok(tier)
-    }
-
-    /// Return all badges currently held by a contributor.
-    pub fn get_badges(env: Env, contributor: Address) -> Result<Vec<Badge>, ContributorError> {
-        // Ensure the contributor exists.
-        env.storage()
-            .persistent()
-            .get::<_, ContributorData>(&DataKey::Contributor(contributor.clone()))
-            .ok_or(ContributorError::ContributorNotFound)?;
-
-        let key = DataKey::Badges(contributor);
-        let badges: Vec<Badge> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-        if env.storage().persistent().has(&key) {
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
-        }
-        Ok(badges)
-    }
-
-    /// Grant a badge to a contributor. Requires multisig approval.
-    ///
-    /// Uses the `UpdateReputation` proposal action as the gate — no new
-    /// action variant is needed since badge management is a reputation-adjacent
-    /// operation governed by the same multisig quorum.
-    pub fn grant_badge(
-        env: Env,
-        executor: Address,
-        proposal_id: u64,
-        contributor: Address,
-        badge: Badge,
-    ) -> Result<(), ContributorError> {
-        consume_approval(&env, &executor, proposal_id, &ProposalAction::UpdateReputation)?;
-
-        // Ensure the contributor exists.
-        env.storage()
-            .persistent()
-            .get::<_, ContributorData>(&DataKey::Contributor(contributor.clone()))
-            .ok_or(ContributorError::ContributorNotFound)?;
-
-        let key = DataKey::Badges(contributor);
-        let mut badges: Vec<Badge> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-
-        // Idempotent: only add if not already present.
-        if !badges.contains(&badge) {
-            badges.push_back(badge);
-        }
-
-        env.storage().persistent().set(&key, &badges);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
-
-        Ok(())
-    }
-
-    /// Revoke a badge from a contributor. Requires multisig approval.
-    pub fn revoke_badge(
-        env: Env,
-        executor: Address,
-        proposal_id: u64,
-        contributor: Address,
-        badge: Badge,
-    ) -> Result<(), ContributorError> {
-        consume_approval(&env, &executor, proposal_id, &ProposalAction::UpdateReputation)?;
-
-        // Ensure the contributor exists.
-        env.storage()
-            .persistent()
-            .get::<_, ContributorData>(&DataKey::Contributor(contributor.clone()))
-            .ok_or(ContributorError::ContributorNotFound)?;
-
-        let key = DataKey::Badges(contributor);
-        let mut badges: Vec<Badge> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-
-        if let Some(idx) = badges.first_index_of(&badge) {
-            badges.remove(idx);
-        }
-
-        if badges.is_empty() {
-            env.storage().persistent().remove(&key);
-        } else {
-            env.storage().persistent().set(&key, &badges);
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
-        }
-
-        Ok(())
-    }
 }
 
 // ── Notification receiver ─────────────────────────────────────
@@ -1209,7 +1191,7 @@ mod test {
         assert_eq!(data.github_handle, handle);
     }
 
-    // ── Badge / tier tests ────────────────────────────────────
+    // ── Badges & Tiers ────────────────────────────────────────
 
     #[test]
     fn test_tier_calculation() {
@@ -1220,17 +1202,22 @@ mod test {
         let handle = soroban_sdk::String::from_str(&s.env, "tier_dev");
         client.register_contributor(&contributor, &handle);
 
-        // Fresh contributor starts at the lowest tier.
-        let tier = client.get_tier(&contributor);
-        assert_eq!(tier, ContributorTier::Bronze);
+        assert_eq!(client.get_tier(&contributor), ContributorTier::Novice);
 
-        // Boost reputation enough to reach Silver.
         let id = client.propose(&s.alice, &ProposalAction::UpdateReputation);
         client.sign(&s.bob, &id);
-        client.update_reputation(&s.alice, &id, &contributor, &100i64);
+        client.update_reputation(&s.alice, &id, &contributor, &20i64);
+        assert_eq!(client.get_tier(&contributor), ContributorTier::Builder);
 
-        let tier = client.get_tier(&contributor);
-        assert_eq!(tier, ContributorTier::Silver);
+        let id2 = client.propose(&s.alice, &ProposalAction::UpdateReputation);
+        client.sign(&s.bob, &id2);
+        client.update_reputation(&s.alice, &id2, &contributor, &50i64);
+        assert_eq!(client.get_tier(&contributor), ContributorTier::Architect);
+
+        let id3 = client.propose(&s.alice, &ProposalAction::UpdateReputation);
+        client.sign(&s.bob, &id3);
+        client.update_reputation(&s.alice, &id3, &contributor, &50i64);
+        assert_eq!(client.get_tier(&contributor), ContributorTier::Core);
     }
 
     #[test]
@@ -1242,21 +1229,20 @@ mod test {
         let handle = soroban_sdk::String::from_str(&s.env, "badge_dev");
         client.register_contributor(&contributor, &handle);
 
-        // Grant a badge via multisig approval.
-        let badge = Badge::TopContributor;
-        let id = client.propose(&s.alice, &ProposalAction::UpdateReputation);
+        assert_eq!(client.get_badges(&contributor).len(), 0);
+
+        let id = client.propose(&s.alice, &ProposalAction::GrantBadge);
         client.sign(&s.bob, &id);
-        client.grant_badge(&s.alice, &id, &contributor, &badge);
+        client.grant_badge(&s.alice, &id, &contributor, &Badge::EarlyAdopter);
 
         let badges = client.get_badges(&contributor);
-        assert!(badges.contains(&badge));
+        assert_eq!(badges.len(), 1);
+        assert!(badges.contains(Badge::EarlyAdopter));
 
-        // Revoke the badge.
-        let id2 = client.propose(&s.alice, &ProposalAction::UpdateReputation);
+        let id2 = client.propose(&s.alice, &ProposalAction::RevokeBadge);
         client.sign(&s.bob, &id2);
-        client.revoke_badge(&s.alice, &id2, &contributor, &badge);
+        client.revoke_badge(&s.alice, &id2, &contributor, &Badge::EarlyAdopter);
 
-        let badges_after = client.get_badges(&contributor);
-        assert!(!badges_after.contains(&badge));
+        assert_eq!(client.get_badges(&contributor).len(), 0);
     }
 }
