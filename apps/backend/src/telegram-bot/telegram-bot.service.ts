@@ -8,7 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import TelegramBot, { Message } from 'node-telegram-bot-api';
-import { TelegramSubscription, TelegramAlertType } from './telegram-subscription.entity';
+import {
+  TelegramSubscription,
+  TelegramAlertType,
+} from './telegram-subscription.entity';
 import { TelegramSilence } from './telegram-silence.entity';
 import { PriceService } from '../price/price.service';
 import { SentimentService } from '../sentiment/sentiment.service';
@@ -54,21 +57,51 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private registerHandlers() {
     if (!this.bot) return;
 
-    this.bot.onText(/\/start/, (msg) => { void this.handleStart(msg); });
-    this.bot.onText(/\/status/, (msg) => { void this.handleStatus(msg); });
-    this.bot.onText(/\/price (.+)/, (msg, match) => { void this.handlePrice(msg, match); });
-    this.bot.onText(/\/price$/, (msg) => { void this.handlePrice(msg, null); });
-    this.bot.onText(/\/sentiment/, (msg) => { void this.handleSentiment(msg); });
-    this.bot.onText(/\/trend/, (msg) => { void this.handleTrend(msg); });
-    this.bot.onText(/\/subscribe (.+)/, (msg, match) => { void this.handleSubscribe(msg, match); });
-    this.bot.onText(/\/subscribe$/, (msg) => { void this.handleSubscribe(msg, null); });
-    this.bot.onText(/\/unsubscribe (.+)/, (msg, match) => { void this.handleUnsubscribe(msg, match); });
-    this.bot.onText(/\/unsubscribe$/, (msg) => { void this.handleUnsubscribe(msg, null); });
-    this.bot.onText(/\/silence (.+)/, (msg, match) => { void this.handleSilence(msg, match); });
-    this.bot.onText(/\/silence$/, (msg) => { void this.handleSilence(msg, null); });
-    this.bot.onText(/\/unsilence/, (msg) => { void this.handleUnsilence(msg); });
-    this.bot.onText(/\/subscriptions/, (msg) => { void this.handleSubscriptions(msg); });
-    this.bot.onText(/\/help/, (msg) => { void this.handleHelp(msg); });
+    this.bot.onText(/\/start/, (msg) => {
+      void this.handleStart(msg);
+    });
+    this.bot.onText(/\/status/, (msg) => {
+      void this.handleStatus(msg);
+    });
+    this.bot.onText(/\/price (.+)/, (msg, match) => {
+      void this.handlePrice(msg, match);
+    });
+    this.bot.onText(/\/price$/, (msg) => {
+      void this.handlePrice(msg, null);
+    });
+    this.bot.onText(/\/sentiment/, (msg) => {
+      void this.handleSentiment(msg);
+    });
+    this.bot.onText(/\/trend/, (msg) => {
+      void this.handleTrend(msg);
+    });
+    this.bot.onText(/\/subscribe (.+)/, (msg, match) => {
+      void this.handleSubscribe(msg, match);
+    });
+    this.bot.onText(/\/subscribe$/, (msg) => {
+      void this.handleSubscribe(msg, null);
+    });
+    this.bot.onText(/\/unsubscribe (.+)/, (msg, match) => {
+      void this.handleUnsubscribe(msg, match);
+    });
+    this.bot.onText(/\/unsubscribe$/, (msg) => {
+      void this.handleUnsubscribe(msg, null);
+    });
+    this.bot.onText(/\/silence (.+)/, (msg, match) => {
+      void this.handleSilence(msg, match);
+    });
+    this.bot.onText(/\/silence$/, (msg) => {
+      void this.handleSilence(msg, null);
+    });
+    this.bot.onText(/\/unsilence/, (msg) => {
+      void this.handleUnsilence(msg);
+    });
+    this.bot.onText(/\/subscriptions/, (msg) => {
+      void this.handleSubscriptions(msg);
+    });
+    this.bot.onText(/\/help/, (msg) => {
+      void this.handleHelp(msg);
+    });
 
     this.bot.on('polling_error', (error) => {
       this.logger.error('Telegram polling error', error);
@@ -117,7 +150,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
   private async handleStatus(msg: Message) {
     const chatId = this.getChatId(msg);
-    const sub = await this.subscriptionRepository.findOne({ where: { chatId } });
+    const sub = await this.subscriptionRepository.findOne({
+      where: { chatId },
+    });
 
     if (!sub || !sub.isActive) {
       await this.sendMessage(
@@ -146,7 +181,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     try {
       const price = await this.priceService.getCurrentPrice(asset);
       if (price === 0) {
-        await this.sendMessage(chatId, `Price for *${asset}* is not available.`);
+        await this.sendMessage(
+          chatId,
+          `Price for *${asset}* is not available.`,
+        );
         return;
       }
 
@@ -156,7 +194,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       );
     } catch (error) {
       this.logger.error('Price command error', error);
-      await this.sendMessage(chatId, 'Failed to fetch price. Please try again later.');
+      await this.sendMessage(
+        chatId,
+        'Failed to fetch price. Please try again later.',
+      );
     }
   }
 
@@ -169,7 +210,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       await this.sendMessage(chatId, sentimentText);
     } catch (error) {
       this.logger.error('Sentiment command error', error);
-      await this.sendMessage(chatId, 'Failed to fetch sentiment. Please try again later.');
+      await this.sendMessage(
+        chatId,
+        'Failed to fetch sentiment. Please try again later.',
+      );
     }
   }
 
@@ -218,7 +262,10 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       await this.sendMessage(chatId, text);
     } catch (error) {
       this.logger.error('Trend command error', error);
-      await this.sendMessage(chatId, 'Failed to fetch trend. Please try again later.');
+      await this.sendMessage(
+        chatId,
+        'Failed to fetch trend. Please try again later.',
+      );
     }
   }
 
@@ -226,7 +273,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const chatId = this.getChatId(msg);
     const typeInput = match?.[1]?.trim().toLowerCase() ?? '';
 
-    const validTypes = Object.values(TelegramAlertType).map((t) => t.toLowerCase());
+    const validTypes = Object.values(TelegramAlertType).map((t) =>
+      t.toLowerCase(),
+    );
     if (!validTypes.includes(typeInput)) {
       await this.sendMessage(
         chatId,
@@ -261,7 +310,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const chatId = this.getChatId(msg);
     const typeInput = match?.[1]?.trim().toLowerCase() ?? '';
 
-    const validTypes = Object.values(TelegramAlertType).map((t) => t.toLowerCase());
+    const validTypes = Object.values(TelegramAlertType).map((t) =>
+      t.toLowerCase(),
+    );
     if (!validTypes.includes(typeInput)) {
       await this.sendMessage(
         chatId,
@@ -272,16 +323,24 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
 
     const alertType = typeInput as TelegramAlertType;
-    const sub = await this.subscriptionRepository.findOne({ where: { chatId } });
+    const sub = await this.subscriptionRepository.findOne({
+      where: { chatId },
+    });
 
     if (!sub) {
-      await this.sendMessage(chatId, 'You are not subscribed. Use /start to subscribe.');
+      await this.sendMessage(
+        chatId,
+        'You are not subscribed. Use /start to subscribe.',
+      );
       return;
     }
 
     sub.alertTypes = sub.alertTypes.filter((t) => t !== alertType);
     await this.subscriptionRepository.save(sub);
-    await this.sendMessage(chatId, `Unsubscribed from *${alertType}* alerts ❌`);
+    await this.sendMessage(
+      chatId,
+      `Unsubscribed from *${alertType}* alerts ❌`,
+    );
   }
 
   private async handleSilence(msg: Message, match: RegExpExecArray | null) {
@@ -332,7 +391,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
 
   private async handleSubscriptions(msg: Message) {
     const chatId = this.getChatId(msg);
-    const sub = await this.subscriptionRepository.findOne({ where: { chatId } });
+    const sub = await this.subscriptionRepository.findOne({
+      where: { chatId },
+    });
 
     if (!sub || !sub.isActive) {
       await this.sendMessage(

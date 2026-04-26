@@ -225,24 +225,24 @@ export class PortfolioService {
       relations: ['stellarAccounts'],
     });
 
-        const hasLinkedAccount =
-          user?.stellarAccounts && user.stellarAccounts.length > 0;
+    const hasLinkedAccount =
+      user?.stellarAccounts && user.stellarAccounts.length > 0;
 
-        if (!hasLinkedAccount) {
-          this.logger.log(`User ${userId} has no linked Stellar accounts`);
-          return {
-            totalValueUsd: '0.00',
-            assets: [],
-            lastUpdated: null,
-            hasLinkedAccount: false,
-          };
-        }
+    if (!hasLinkedAccount) {
+      this.logger.log(`User ${userId} has no linked Stellar accounts`);
+      return {
+        totalValueUsd: '0.00',
+        assets: [],
+        lastUpdated: null,
+        hasLinkedAccount: false,
+      };
+    }
 
-        // User has linked accounts, try to get the latest snapshot
-        const latestSnapshot = await this.snapshotRepository.findOne({
-          where: { userId },
-          order: { createdAt: 'DESC' },
-        });
+    // User has linked accounts, try to get the latest snapshot
+    const latestSnapshot = await this.snapshotRepository.findOne({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+    });
 
     if (!latestSnapshot) {
       return {
